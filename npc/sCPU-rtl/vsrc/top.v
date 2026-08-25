@@ -2,7 +2,10 @@ module top (
   input        clk,
   input        rst,
   output [3:0] pc_out,
-  output [7:0] sum
+  output [7:0] r0_out,
+  output [7:0] r1_out,
+  output [7:0] r2_out,
+  output [7:0] r3_out
 );
   wire [3:0] pc;
   wire [3:0] next_pc;
@@ -19,7 +22,8 @@ module top (
   wire is_li    = (op == 2'b10);
   wire is_bner0 = (op == 2'b11);
 
-  wire [7:0] rdata1, rdata2, r0_data;
+  wire [7:0] rdata1, rdata2;
+  wire [7:0] r0_data, r1_data, r2_data, r3_data;
   wire [7:0] alu_result = rdata1 + rdata2;
   wire [7:0] imm_ext = {4'b0, imm};
   wire [7:0] wdata = ({8{is_add}} & alu_result) | ({8{is_li}} & imm_ext);
@@ -37,9 +41,13 @@ module top (
     .waddr(rd), .wdata(wdata), .wen(wen),
     .raddr1(rs1), .raddr2(rs2),
     .rdata1(rdata1), .rdata2(rdata2),
-    .r0_data(r0_data),
-    .raddr_dbg(2'd2), .rdata_dbg(sum)
+    .r0_data(r0_data), .r1_data(r1_data),
+    .r2_data(r2_data), .r3_data(r3_data)
   );
 
   assign pc_out = pc;
+  assign r0_out = r0_data;
+  assign r1_out = r1_data;
+  assign r2_out = r2_data;
+  assign r3_out = r3_data;
 endmodule

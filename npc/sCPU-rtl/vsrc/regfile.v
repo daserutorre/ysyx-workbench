@@ -9,8 +9,9 @@ module regfile (
   output [7:0] rdata1,
   output [7:0] rdata2,
   output [7:0] r0_data,
-  input  [1:0] raddr_dbg,
-  output [7:0] rdata_dbg
+  output [7:0] r1_data,
+  output [7:0] r2_data,
+  output [7:0] r3_data
 );
   wire [7:0] r0, r1, r2, r3;
 
@@ -20,6 +21,9 @@ module regfile (
   Reg #(8, 8'h0) reg3 (clk, rst, wdata, r3, wen & (waddr == 2'd3));
 
   assign r0_data = r0;
+  assign r1_data = r1;
+  assign r2_data = r2;
+  assign r3_data = r3;
 
   MuxKey #(4, 2, 8) rmux1 (rdata1, raddr1, {
     2'd0, r0,
@@ -29,13 +33,6 @@ module regfile (
   });
 
   MuxKey #(4, 2, 8) rmux2 (rdata2, raddr2, {
-    2'd0, r0,
-    2'd1, r1,
-    2'd2, r2,
-    2'd3, r3
-  });
-
-  MuxKey #(4, 2, 8) rmux_dbg (rdata_dbg, raddr_dbg, {
     2'd0, r0,
     2'd1, r1,
     2'd2, r2,
