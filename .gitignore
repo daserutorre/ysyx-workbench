@@ -6,8 +6,8 @@
 !/nanos-lite/*
 !/navy-apps/*
 !/npc/*
+!/nvboard/*
 !Makefile
 !README.md
 !.gitignore
 !init.sh
-/nvboard

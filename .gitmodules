@@ -1,0 +1,3 @@
+[submodule "nvboard"]
+	path = nvboard
+	url = git@github.com:daserutorre/nvboard.git
