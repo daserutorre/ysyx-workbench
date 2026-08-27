@@ -2,10 +2,21 @@
 #include <string.h>
 #include <stdio.h>
 
-#define MEM_BASE  0x80000000u
-#define MEM_SIZE  (128 * 1024 * 1024) // 128MB
+#define MEM_BASE     0x80000000u
+#define MEM_SIZE     (128 * 1024 * 1024) // 128MB
+#define UART_ADDR    0x10000000u
+#define TIMER_LO_ADDR 0x20000000u
+#define TIMER_HI_ADDR 0x20000004u
+
+// Assumed clock frequency for the *simulated* CPU, used to convert a cycle
+// count into a "simulated microseconds" value for the timer registers.
+// Change this to explore how performance would look at different clock
+// speeds (e.g. 1000000000ull for 1000MHz).
+#define CLOCK_FREQ_HZ 100000000ull // 100MHz
+
 static uint8_t *pmem = nullptr;
 static bool g_halted = false;
+static uint64_t g_cycle_count = 0;
 
 static uint8_t *get_pmem() {
   if (!pmem) {
@@ -13,6 +24,11 @@ static uint8_t *get_pmem() {
     memset(pmem, 0, MEM_SIZE);
   }
   return pmem;
+}
+
+static uint64_t get_uptime_us() {
+  // us = cycles / (Hz / 1,000,000) = cycles * 1,000,000 / Hz
+  return (g_cycle_count * 1000000ull) / CLOCK_FREQ_HZ;
 }
 
 // ---- Plain C++ helpers (testbench-facing) ----
@@ -43,20 +59,27 @@ bool npc_is_halted() {
   return g_halted;
 }
 
+void npc_tick() {
+  g_cycle_count++;
+}
+
 // ---- DPI-C functions (RTL-facing, called directly from Verilog) ----
 
-// Reads one 32-bit word at a word-aligned address.
 extern "C" int pmem_read(int raddr) {
-  uint8_t *m = get_pmem();
   uint32_t addr = ((uint32_t)raddr) & ~0x3u; // force word alignment
+
+  // ---- Timer: two word-registers holding the low/high half of elapsed
+  // *simulated* microseconds (cycle count / assumed clock frequency). ----
+  if (addr == TIMER_LO_ADDR) {
+    return (int)(uint32_t)(get_uptime_us() & 0xFFFFFFFFu);
+  }
+  if (addr == TIMER_HI_ADDR) {
+    return (int)(uint32_t)(get_uptime_us() >> 32);
+  }
+
+  uint8_t *m = get_pmem();
   uint32_t off = addr - MEM_BASE;
   if (off >= MEM_SIZE) {
-    // Reads are side-effect-free, and this wire is evaluated every cycle
-    // regardless of whether the current instruction actually needs it
-    // (e.g. the load-address wire in top.v computes unconditionally).
-    // During reset, registers/PC/immediates are still settling, so
-    // transient out-of-range addresses here are expected and harmless --
-    // stay silent rather than spamming the log.
     return 0;
   }
   return (int)((uint32_t)m[off]        |
@@ -65,14 +88,20 @@ extern "C" int pmem_read(int raddr) {
                (uint32_t)m[off+3] << 24);
 }
 
-// Writes wdata into memory at a word-aligned address, only touching the
-// byte lanes selected by wmask (bit i controls byte i, 1 = write that byte).
 extern "C" void pmem_write(int waddr, int wdata, int wmask) {
-  uint8_t *m = get_pmem();
   uint32_t addr = ((uint32_t)waddr) & ~0x3u;
-  uint32_t off = addr - MEM_BASE;
   uint32_t data = (uint32_t)wdata;
   uint32_t mask = (uint32_t)wmask;
+
+  // ---- UART: any byte written to this address is printed, not stored. ----
+  if (addr == UART_ADDR) {
+    if (mask & 0x1) putchar((char)(data & 0xFF));
+    fflush(stdout);
+    return;
+  }
+
+  uint8_t *m = get_pmem();
+  uint32_t off = addr - MEM_BASE;
 
   if (off >= MEM_SIZE) {
     printf("pmem_write: address 0x%08x out of range\n", addr);

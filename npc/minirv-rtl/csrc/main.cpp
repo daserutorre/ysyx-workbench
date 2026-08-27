@@ -9,6 +9,7 @@ static Vtop *dut;
 static void single_cycle() {
   dut->clk = 0; dut->eval();
   dut->clk = 1; dut->eval();
+  npc_tick();
 }
 
 static void reset(int n) {
@@ -52,8 +53,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // AM's convention: main()'s return value ends up in a0 (x10) right before
-  // halt() executes ebreak, so we can read it back the same way.
   uint32_t a0 = dbg_read(10);
   printf("\nHalted after %d steps. pc=0x%08x a0=%u\n", steps, dut->pc, a0);
 
