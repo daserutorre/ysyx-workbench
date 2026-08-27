@@ -1,3 +1,6 @@
 [submodule "nvboard"]
 	path = nvboard
 	url = git@github.com:daserutorre/nvboard.git
+[submodule "am-kernels"]
+	path = am-kernels
+	url = git@github.com:daserutorre/am-kernels.git

@@ -7,11 +7,11 @@
 !/navy-apps/*
 !/npc/*
 !/nvboard/*
+!/am-kernels/*
 !Makefile
 !README.md
 !.gitignore
 !init.sh
 /fceux-am
-/am-kernels
 /riscv-tests
 /archbench

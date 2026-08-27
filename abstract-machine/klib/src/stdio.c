@@ -49,48 +49,80 @@ int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
       continue;
     }
     p++; // skip '%'
+
+    // Parse an optional minimum field width, e.g. "10" in "%10u".
+    int width = 0;
+    while (*p >= '0' && *p <= '9') {
+      width = width * 10 + (*p - '0');
+      p++;
+    }
+
+    // Parse an optional length modifier: "l" or "ll" (we only distinguish
+    // "64-bit" vs "not", which covers both since we always widen anyway).
+    int is_long = 0;
+    while (*p == 'l') {
+      is_long = 1;
+      p++;
+    }
+
+    // Render the converted value into a small local buffer first, so we
+    // can measure its length and apply width-padding before copying it
+    // into the real output.
+    char conv[32];
+    size_t conv_len = 0;
+
     switch (*p) {
       case 'd': {
-        int v = va_arg(ap, int);
-        __out_int(out, n, &pos, v);
+        long long v = is_long ? va_arg(ap, long long) : (long long)va_arg(ap, int);
+        __out_int(conv, sizeof(conv), &conv_len, v);
         break;
       }
       case 'u': {
-        unsigned int v = va_arg(ap, unsigned int);
-        __out_uint(out, n, &pos, v, 10, 0);
+        unsigned long long v = is_long ? va_arg(ap, unsigned long long) : (unsigned long long)va_arg(ap, unsigned int);
+        __out_uint(conv, sizeof(conv), &conv_len, v, 10, 0);
         break;
       }
       case 'x': {
-        unsigned int v = va_arg(ap, unsigned int);
-        __out_uint(out, n, &pos, v, 16, 0);
+        unsigned long long v = is_long ? va_arg(ap, unsigned long long) : (unsigned long long)va_arg(ap, unsigned int);
+        __out_uint(conv, sizeof(conv), &conv_len, v, 16, 0);
         break;
       }
       case 'X': {
-        unsigned int v = va_arg(ap, unsigned int);
-        __out_uint(out, n, &pos, v, 16, 1);
+        unsigned long long v = is_long ? va_arg(ap, unsigned long long) : (unsigned long long)va_arg(ap, unsigned int);
+        __out_uint(conv, sizeof(conv), &conv_len, v, 16, 1);
         break;
       }
       case 's': {
         const char *s = va_arg(ap, const char *);
         if (!s) s = "(null)";
-        __out_str(out, n, &pos, s);
+        __out_str(conv, sizeof(conv), &conv_len, s);
         break;
       }
       case 'c': {
         char c = (char)va_arg(ap, int);
-        __out_char(out, n, &pos, c);
+        __out_char(conv, sizeof(conv), &conv_len, c);
         break;
       }
       case '%': {
-        __out_char(out, n, &pos, '%');
+        __out_char(conv, sizeof(conv), &conv_len, '%');
         break;
       }
       default: {
-        __out_char(out, n, &pos, '%');
-        __out_char(out, n, &pos, *p);
+        __out_char(conv, sizeof(conv), &conv_len, '%');
+        __out_char(conv, sizeof(conv), &conv_len, *p);
         break;
       }
     }
+
+    // Right-align with spaces if the converted value is shorter than the
+    // requested minimum width.
+    for (size_t i = conv_len; i < (size_t)width; i++) {
+      __out_char(out, n, &pos, ' ');
+    }
+    for (size_t i = 0; i < conv_len; i++) {
+      __out_char(out, n, &pos, conv[i]);
+    }
+
     p++;
   }
 
