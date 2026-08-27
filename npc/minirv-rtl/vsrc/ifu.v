@@ -7,7 +7,7 @@ module ifu (
 );
   import "DPI-C" function int pmem_read(input int raddr);
 
-  Reg #(32, 32'h0) u_pc (.clk(clk), .rst(rst), .din(next_pc), .dout(pc), .wen(1'b1));
+  Reg #(32, 32'h80000000) u_pc (.clk(clk), .rst(rst), .din(next_pc), .dout(pc), .wen(1'b1));
 
   assign inst = pmem_read(pc);
 endmodule
