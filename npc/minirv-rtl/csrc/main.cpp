@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
 
   int steps = 0;
   const int MAX_STEPS = 10000000;
+  const int TRACE_STEPS = 20;
   while (!npc_is_halted() && steps < MAX_STEPS) {
     single_cycle();
     steps++;

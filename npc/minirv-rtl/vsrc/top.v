@@ -3,7 +3,12 @@ module top (
   input         rst,
   output [31:0] pc,
   input  [3:0]  dbg_addr,  // testbench-controlled: which register to inspect
-  output [31:0] dbg_data
+  output [31:0] dbg_data,
+  output [1:0]  dbg_state,
+  output        dbg_ifu_reqValid,
+  output        dbg_ifu_respValid,
+  output        dbg_lsu_reqValid,
+  output        dbg_lsu_respValid
 );
   import "DPI-C" function void npc_trap();
   import "DPI-C" function void npc_commit();
@@ -156,4 +161,10 @@ module top (
     else next_pc = pc + 4;
   end
   assign next_pc_wire = next_pc;
+
+  assign dbg_state = state;
+  assign dbg_ifu_reqValid = ifu_reqValid;
+  assign dbg_ifu_respValid = ifu_respValid;
+  assign dbg_lsu_reqValid = lsu_reqValid;
+  assign dbg_lsu_respValid = lsu_respValid;
 endmodule
