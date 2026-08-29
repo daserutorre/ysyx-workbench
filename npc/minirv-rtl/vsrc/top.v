@@ -5,15 +5,36 @@ module top (
   input  [3:0]  dbg_addr,  // testbench-controlled: which register to inspect
   output [31:0] dbg_data
 );
-  import "DPI-C" function int  pmem_read(input int raddr);
-  import "DPI-C" function void pmem_write(input int waddr, input int wdata, input int wmask);
   import "DPI-C" function void npc_trap();
+  import "DPI-C" function void npc_commit();
+
+  // ---- Overall control FSM ----
+  //   IF_REQ  : issue an instruction-fetch request.
+  //   IF_WAIT : wait for ifu_respValid. Once valid, decode this same
+  //             cycle; if the instruction needs memory (load/store),
+  //             *also* issue the LSU request this same cycle (address
+  //             is already computable from decode) and move to
+  //             MEM_WAIT. Otherwise commit right here and go back to
+  //             IF_REQ.
+  //   MEM_WAIT: wait for lsu_respValid. Once valid, commit and go back
+  //             to IF_REQ.
+  localparam IF_REQ = 2'd0, IF_WAIT = 2'd1, MEM_WAIT = 2'd2;
+  reg [1:0] state;
 
   // ---- Fetch ----
-  wire [31:0] next_pc_wire;  // input
-  wire [31:0] inst;          // output
+  wire [31:0] inst;
+  wire        ifu_respValid;
+  wire        ifu_reqValid = (state == IF_REQ);
+  wire [31:0] next_pc_wire;
+  wire        commit;
+  wire        pc_wen = commit;
 
-  ifu u_ifu (.clk(clk), .rst(rst), .next_pc(next_pc_wire), .pc(pc), .inst(inst));
+  ifu u_ifu (
+    .clk(clk), .rst(rst),
+    .next_pc(next_pc_wire), .pc_wen(pc_wen),
+    .ifu_reqValid(ifu_reqValid),
+    .pc(pc), .inst(inst), .ifu_respValid(ifu_respValid)
+  );
 
   // ---- Decode ----
   wire [6:0]  opcode, funct7;
@@ -32,15 +53,40 @@ module top (
     .is_jalr(is_jalr), .is_ebreak(is_ebreak)
   );
 
+  wire needs_mem = is_lw | is_lbu | is_sw | is_sb;
+
+  // ---- State transition ----
+  always @(posedge clk) begin
+    if (rst) state <= IF_REQ;
+    else begin
+      case (state)
+        IF_REQ:   state <= IF_WAIT;
+        IF_WAIT:  state <= !ifu_respValid ? IF_WAIT :
+                            needs_mem     ? MEM_WAIT : IF_REQ;
+        MEM_WAIT: state <= !lsu_respValid ? MEM_WAIT : IF_REQ;
+        default:  state <= IF_REQ;
+      endcase
+    end
+  end
+
+  // ---- Commit: the cycle a real instruction's results are final ----
+  assign commit = (state == IF_WAIT  && ifu_respValid && !needs_mem) ||
+                  (state == MEM_WAIT && lsu_respValid);
+
   // ---- ebreak: notify the C++ testbench to stop the simulation ----
   always @(posedge clk) begin
-    if (is_ebreak) npc_trap();
+    if (commit && is_ebreak) npc_trap();
+  end
+
+  // ---- Instruction retirement, for IPC measurement ----
+  always @(posedge clk) begin
+    if (!rst && commit) npc_commit();
   end
 
   // ---- Register file ----
-  wire [31:0] rdata1, rdata2;   // output
-  wire [31:0] wdata;            // input
-  wire        wen = is_add | is_addi | is_lui | is_lw | is_lbu | is_jalr;
+  wire [31:0] rdata1, rdata2;
+  wire [31:0] wdata;
+  wire        wen = commit & (is_add | is_addi | is_lui | is_lw | is_lbu | is_jalr);
 
   RegisterFile #(4, 32) u_regfile (
     .clk(clk),
@@ -50,7 +96,7 @@ module top (
     .raddr_dbg(dbg_addr), .rdata_dbg(dbg_data)
   );
 
-  // ---- Execute: shared ALU (one adder, muxed second operand) ----
+  // ---- Execute: shared ALU ----
   reg [31:0] alu_b;
   always @(*) begin
     if (is_add) alu_b = rdata2;
@@ -62,26 +108,34 @@ module top (
   wire [31:0] alu_result;
   alu u_alu (.a(rdata1), .b(alu_b), .c(alu_result));
 
-  // alu_result serves double duty depending on the instruction:
-  //   add/addi -> the arithmetic result itself
-  //   lw/lbu   -> the load address (rdata1 + imm_i)
-  //   sw/sb    -> the store address (rdata1 + imm_s)
-  //   jalr     -> the jump target base (rdata1 + imm_i), before masking bit 0
   wire [31:0] word_addr = {alu_result[31:2], 2'b00};
   wire [1:0]  byte_lane = alu_result[1:0];
 
-  // ---- Execute: reads (lw/lbu) ----
-  wire [31:0] load_word = pmem_read(word_addr);
-  wire [31:0] lbu_result = (load_word >> (byte_lane * 8)) & 32'hFF;
-
-  // ---- Execute: writes (sw/sb), triggered once per cycle on the clock edge ----
+  // ---- LSU bus wiring: request issued the SAME cycle decode determines
+  // memory access is needed (overlapping with IF_WAIT), not a separate
+  // dedicated cycle. ----
+  wire        lsu_reqValid = (state == IF_WAIT) && ifu_respValid && needs_mem;
+  wire        lsu_wen      = is_sw | is_sb;
   wire [31:0] sb_shifted_data = ({24'b0, rdata2[7:0]}) << (byte_lane * 8);
-  wire [3:0]  sb_mask = 4'b0001 << byte_lane;
+  wire [3:0]  sb_mask         = 4'b0001 << byte_lane;
+  wire [31:0] lsu_wdata = is_sw ? rdata2 : sb_shifted_data;
+  wire [3:0]  lsu_wmask = is_sw ? 4'b1111 : sb_mask;
+  wire        lsu_respValid;
+  wire [31:0] lsu_rdata;
 
-  always @(posedge clk) begin
-    if (is_sw) pmem_write(word_addr, rdata2, {28'b0, 4'b1111});
-    else if (is_sb) pmem_write(word_addr, sb_shifted_data, {28'b0, sb_mask});
-  end
+  lsu u_lsu (
+    .clk(clk), .rst(rst),
+    .lsu_reqValid(lsu_reqValid),
+    .lsu_addr(word_addr),
+    .lsu_wen(lsu_wen),
+    .lsu_wdata(lsu_wdata),
+    .lsu_wmask(lsu_wmask),
+    .lsu_respValid(lsu_respValid),
+    .lsu_rdata(lsu_rdata)
+  );
+
+  wire [31:0] load_word = lsu_rdata;
+  wire [31:0] lbu_result = (load_word >> (byte_lane * 8)) & 32'hFF;
 
   // ---- Execute: jump target and link ----
   wire [31:0] jalr_target = alu_result & ~32'h1;
@@ -94,10 +148,10 @@ module top (
                  ({32{is_lbu}}           & lbu_result)  |
                  ({32{is_jalr}}          & jalr_link);
 
-  // ---- Update PC ----
+  // ---- Next PC (sampled by ifu's PC register only when pc_wen/commit) ----
   reg [31:0] next_pc;
   always @(*) begin
-    if (is_ebreak) next_pc = pc;         // freeze PC on trap
+    if (is_ebreak) next_pc = pc;
     else if (is_jalr) next_pc = jalr_target;
     else next_pc = pc + 4;
   end

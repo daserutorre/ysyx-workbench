@@ -10,13 +10,12 @@
 
 // Assumed clock frequency for the *simulated* CPU, used to convert a cycle
 // count into a "simulated microseconds" value for the timer registers.
-// Change this to explore how performance would look at different clock
-// speeds (e.g. 1000000000ull for 1000MHz).
 #define CLOCK_FREQ_HZ 100000000ull // 100MHz
 
 static uint8_t *pmem = nullptr;
 static bool g_halted = false;
 static uint64_t g_cycle_count = 0;
+static uint64_t g_instret_count = 0;
 
 static uint8_t *get_pmem() {
   if (!pmem) {
@@ -27,7 +26,6 @@ static uint8_t *get_pmem() {
 }
 
 static uint64_t get_uptime_us() {
-  // us = cycles / (Hz / 1,000,000) = cycles * 1,000,000 / Hz
   return (g_cycle_count * 1000000ull) / CLOCK_FREQ_HZ;
 }
 
@@ -63,13 +61,19 @@ void npc_tick() {
   g_cycle_count++;
 }
 
+uint64_t npc_get_cycle_count() {
+  return g_cycle_count;
+}
+
+uint64_t npc_get_instret_count() {
+  return g_instret_count;
+}
+
 // ---- DPI-C functions (RTL-facing, called directly from Verilog) ----
 
 extern "C" int pmem_read(int raddr) {
   uint32_t addr = ((uint32_t)raddr) & ~0x3u; // force word alignment
 
-  // ---- Timer: two word-registers holding the low/high half of elapsed
-  // *simulated* microseconds (cycle count / assumed clock frequency). ----
   if (addr == TIMER_LO_ADDR) {
     return (int)(uint32_t)(get_uptime_us() & 0xFFFFFFFFu);
   }
@@ -93,7 +97,6 @@ extern "C" void pmem_write(int waddr, int wdata, int wmask) {
   uint32_t data = (uint32_t)wdata;
   uint32_t mask = (uint32_t)wmask;
 
-  // ---- UART: any byte written to this address is printed, not stored. ----
   if (addr == UART_ADDR) {
     if (mask & 0x1) putchar((char)(data & 0xFF));
     fflush(stdout);
@@ -116,4 +119,11 @@ extern "C" void pmem_write(int waddr, int wdata, int wmask) {
 
 extern "C" void npc_trap() {
   g_halted = true;
+}
+
+// Called by the RTL exactly once per instruction that genuinely completes
+// (not once per cycle) -- lets us measure real IPC once IFU has idle/wait
+// cycles where no instruction retires.
+extern "C" void npc_commit() {
+  g_instret_count++;
 }

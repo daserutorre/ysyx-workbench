@@ -13,9 +13,14 @@ bool npc_is_halted();
 // frequency) instead of real wall-clock time.
 void npc_tick();
 
-// The actual DPI-C functions (pmem_read, pmem_write, npc_trap) are declared
-// via "import DPI-C" in the Verilog, and Verilator auto-generates their
-// prototypes. Our .cpp just needs to define them with matching extern "C"
-// signatures -- no header declaration is required for that half.
+// Statistics, read by the testbench for IPC measurement.
+uint64_t npc_get_cycle_count();
+uint64_t npc_get_instret_count();
+
+// The actual DPI-C functions (pmem_read, pmem_write, npc_trap, npc_commit)
+// are declared via "import DPI-C" in the Verilog, and Verilator
+// auto-generates their prototypes. Our .cpp just needs to define them with
+// matching extern "C" signatures -- no header declaration is required for
+// that half.
 
 #endif // DPI_H

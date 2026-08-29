@@ -54,7 +54,13 @@ int main(int argc, char **argv) {
   }
 
   uint32_t a0 = dbg_read(10);
+  uint64_t cycles = npc_get_cycle_count();
+  uint64_t instret = npc_get_instret_count();
+  double ipc = cycles > 0 ? (double)instret / (double)cycles : 0.0;
+
   printf("\nHalted after %d steps. pc=0x%08x a0=%u\n", steps, dut->pc, a0);
+  printf("cycles=%llu instret=%llu IPC=%.3f\n",
+    (unsigned long long)cycles, (unsigned long long)instret, ipc);
 
   delete dut;
   return 0;
